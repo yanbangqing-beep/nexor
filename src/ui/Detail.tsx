@@ -1,13 +1,24 @@
 import { Box, Text } from 'ink';
 import type { Session } from '../types.js';
+import { useTerminalSize } from './hooks.js';
 import { statusColor, statusIcon } from './sort.js';
+import { tailFit } from './tail.js';
 
 export interface DetailProps {
   session: Session | undefined;
   output: string;
 }
 
+// Vertical chrome the Detail body has to share the screen with.
+// Tuned by inspection: StatusBar(1) + Prompt(4) + Detail border+padding(2)
+// + Detail header row(1) + marginTop(1) = 9. Add a small safety pad so a
+// final partially-wrapped line doesn't push everything up by one.
+const BASE_RESERVED_ROWS = 10;
+const ERROR_FOOTER_ROWS = 4;
+
 export function Detail({ session, output }: DetailProps) {
+  const { rows } = useTerminalSize();
+
   if (!session) {
     return (
       <Box flexGrow={1} borderStyle="single" borderColor="gray" paddingX={1}>
@@ -16,8 +27,16 @@ export function Detail({ session, output }: DetailProps) {
     );
   }
 
+  const showErrorFooter = session.status === 'error' && Boolean(session.errorMessage);
+  const reserved = BASE_RESERVED_ROWS + (showErrorFooter ? ERROR_FOOTER_ROWS : 0);
+  const available = Math.max(3, rows - reserved);
+
+  const text = output || '(no output yet — type a prompt and press Enter)';
+  const visibleBudget = Math.max(1, available - 1); // leave room for the truncation marker
+  const { visible, truncatedAbove } = tailFit(text, visibleBudget);
+
   return (
-    <Box flexGrow={1} flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" flexGrow={1} borderStyle="single" borderColor="gray" paddingX={1}>
       <Box>
         <Text color="cyan" bold>
           {session.agent}
@@ -32,10 +51,11 @@ export function Detail({ session, output }: DetailProps) {
           {statusIcon(session.status)} {session.status}
         </Text>
       </Box>
-      <Box marginTop={1} flexDirection="column" flexGrow={1}>
-        <Text>{output || '(no output yet — type a prompt and press Enter)'}</Text>
+      <Box marginTop={1} flexDirection="column" height={available} flexShrink={1}>
+        {truncatedAbove ? <Text dimColor>… (earlier output above) …</Text> : null}
+        <Text>{visible}</Text>
       </Box>
-      {session.status === 'error' && session.errorMessage ? (
+      {showErrorFooter ? (
         <Box
           marginTop={1}
           borderStyle="single"
