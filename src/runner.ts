@@ -77,6 +77,8 @@ export function createRunner(deps: RunnerDeps): Runner {
       deps.store.update(sessionId, { status: 'working', errorMessage: undefined });
       deps.outputs.append(sessionId, `\n> ${prompt}\n`);
 
+      let stderrTail = '';
+
       try {
         for await (const evt of adapter.exec({
           prompt,
@@ -86,14 +88,23 @@ export function createRunner(deps: RunnerDeps): Runner {
         })) {
           if (evt.type === 'output') {
             deps.outputs.append(sessionId, `${evt.text}\n`);
+          } else if (evt.type === 'stderr') {
+            stderrTail = evt.text;
           } else if (evt.type === 'session') {
             deps.store.update(sessionId, { agentSessionId: evt.id });
           } else if (evt.type === 'done') {
             const cur = deps.store.get(sessionId);
+            const failed = evt.exitCode !== 0;
             deps.store.update(sessionId, {
-              status: evt.exitCode === 0 ? 'done' : 'error',
+              status: failed ? 'error' : 'done',
               messageCount: (cur?.messageCount ?? 0) + 1,
+              errorMessage: failed
+                ? stderrTail || `agent exited with code ${evt.exitCode}`
+                : undefined,
             });
+            if (failed && stderrTail) {
+              deps.outputs.append(sessionId, `\n[stderr]\n${stderrTail}\n`);
+            }
           }
         }
       } catch (err) {

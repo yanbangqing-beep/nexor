@@ -105,4 +105,18 @@ describe('codex adapter exec()', () => {
 
     expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 1 });
   });
+
+  it('yields a stderr event before done when child writes to stderr', async () => {
+    const adapter = createCodexAdapter({
+      spawn: () => createFakeChild({ stdout: '', stderr: 'codex: command failed\n', exitCode: 1 }),
+    });
+    const events: AgentEvent[] = [];
+    for await (const evt of adapter.exec(baseOpts)) events.push(evt);
+
+    const stderrIdx = events.findIndex((e) => e.type === 'stderr');
+    const doneIdx = events.findIndex((e) => e.type === 'done');
+    expect(stderrIdx).toBeGreaterThanOrEqual(0);
+    expect(stderrIdx).toBeLessThan(doneIdx);
+    expect(events[stderrIdx]).toEqual({ type: 'stderr', text: 'codex: command failed' });
+  });
 });

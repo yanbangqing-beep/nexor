@@ -4,6 +4,7 @@ export type SessionStatus = 'idle' | 'working' | 'done' | 'error';
 
 export type AgentEvent =
   | { type: 'output'; text: string }
+  | { type: 'stderr'; text: string }
   | { type: 'session'; id: string }
   | { type: 'done'; exitCode: number };
 

@@ -42,3 +42,38 @@ export async function awaitExit(child: ChildProcess): Promise<number> {
     child.once('exit', (code) => resolve(code ?? 1));
   });
 }
+
+const DEFAULT_STDERR_CAP = 8192;
+
+/**
+ * Drain a child's stderr concurrently with stdout consumption. Buffers up to
+ * `maxBytes` and appends a truncation marker if the limit is hit. Returns the
+ * trimmed tail; empty string if nothing was emitted.
+ */
+export function drainStderr(
+  stream: NodeJS.ReadableStream | null,
+  maxBytes: number = DEFAULT_STDERR_CAP,
+): Promise<string> {
+  if (!stream) return Promise.resolve('');
+  return new Promise<string>((resolve) => {
+    let buf = '';
+    let truncated = false;
+    stream.on('data', (chunk: Buffer | string) => {
+      if (truncated) return;
+      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      if (buf.length + text.length <= maxBytes) {
+        buf += text;
+      } else {
+        buf += text.slice(0, Math.max(0, maxBytes - buf.length));
+        truncated = true;
+      }
+    });
+    const finish = () => {
+      const tail = truncated ? `${buf}\n[stderr truncated]` : buf;
+      resolve(tail.trim());
+    };
+    stream.once('end', finish);
+    stream.once('close', finish);
+    stream.once('error', finish);
+  });
+}

@@ -1,6 +1,6 @@
 import { defaultSpawn } from '../process/spawn.js';
 import type { Adapter, AgentEvent, ExecOpts } from '../types.js';
-import { type SpawnFn, awaitExit, parseJsonl } from './base.js';
+import { type SpawnFn, awaitExit, drainStderr, parseJsonl } from './base.js';
 
 export interface ClaudeAdapterOpts {
   binary?: string;
@@ -16,6 +16,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOpts = {}): Adapter {
     async *exec(execOpts: ExecOpts): AsyncIterable<AgentEvent> {
       const args = buildClaudeArgs(execOpts);
       const child = spawn(binary, args, { cwd: execOpts.cwd, signal: execOpts.signal });
+      const stderrPromise = drainStderr(child.stderr);
       let sessionEmitted = false;
 
       try {
@@ -31,6 +32,8 @@ export function createClaudeAdapter(opts: ClaudeAdapterOpts = {}): Adapter {
         if (!isAbortError(err)) throw err;
       }
 
+      const stderrText = await stderrPromise;
+      if (stderrText) yield { type: 'stderr', text: stderrText };
       const exitCode = await awaitExit(child);
       yield { type: 'done', exitCode };
     },

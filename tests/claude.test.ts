@@ -124,4 +124,27 @@ describe('claude adapter exec()', () => {
 
     expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 1 });
   });
+
+  it('yields a stderr event before done when child writes to stderr', async () => {
+    const adapter = createClaudeAdapter({
+      spawn: () => createFakeChild({ stdout: '', stderr: 'claude: not found\n', exitCode: 127 }),
+    });
+    const events: AgentEvent[] = [];
+    for await (const evt of adapter.exec(baseOpts)) events.push(evt);
+
+    const stderrIdx = events.findIndex((e) => e.type === 'stderr');
+    const doneIdx = events.findIndex((e) => e.type === 'done');
+    expect(stderrIdx).toBeGreaterThanOrEqual(0);
+    expect(stderrIdx).toBeLessThan(doneIdx);
+    expect(events[stderrIdx]).toEqual({ type: 'stderr', text: 'claude: not found' });
+  });
+
+  it('omits stderr event when child stderr is empty', async () => {
+    const adapter = createClaudeAdapter({
+      spawn: () => createFakeChild({ stdout: '', exitCode: 0 }),
+    });
+    const events: AgentEvent[] = [];
+    for await (const evt of adapter.exec(baseOpts)) events.push(evt);
+    expect(events.some((e) => e.type === 'stderr')).toBe(false);
+  });
 });

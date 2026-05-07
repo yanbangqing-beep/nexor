@@ -40,6 +40,44 @@ describe('runner.run', () => {
     const { store, runner, session } = setup([{ type: 'done', exitCode: 1 }]);
     await runner.run(session.id, 'do thing');
     expect(store.get(session.id)?.status).toBe('error');
+    expect(store.get(session.id)?.errorMessage).toBe('agent exited with code 1');
+  });
+
+  it('surfaces stderr text on errorMessage when exit is non-zero', async () => {
+    const { store, outputs, runner, session } = setup([
+      { type: 'stderr', text: 'EACCES: permission denied' },
+      { type: 'done', exitCode: 2 },
+    ]);
+    await runner.run(session.id, 'p');
+    expect(store.get(session.id)?.status).toBe('error');
+    expect(store.get(session.id)?.errorMessage).toBe('EACCES: permission denied');
+    expect(outputs.get(session.id)).toContain('[stderr]');
+  });
+
+  it('ignores stderr when exit is zero', async () => {
+    const { store, runner, session } = setup([
+      { type: 'stderr', text: 'noisy warning' },
+      { type: 'done', exitCode: 0 },
+    ]);
+    await runner.run(session.id, 'p');
+    expect(store.get(session.id)?.status).toBe('done');
+    expect(store.get(session.id)?.errorMessage).toBeUndefined();
+  });
+
+  it('clears errorMessage when a previously failed session succeeds', async () => {
+    const { store, runner, session } = setup([{ type: 'done', exitCode: 1 }]);
+    await runner.run(session.id, 'first');
+    expect(store.get(session.id)?.errorMessage).toBeDefined();
+
+    const adapter2 = createStubAdapter('claude', [{ type: 'done', exitCode: 0 }]);
+    const runner2 = createRunner({
+      store,
+      outputs: createOutputStore(),
+      adapters: { claude: adapter2 },
+    });
+    await runner2.run(session.id, 'retry');
+    expect(store.get(session.id)?.status).toBe('done');
+    expect(store.get(session.id)?.errorMessage).toBeUndefined();
   });
 
   it('appends prompt + agent output to OutputStore', async () => {
