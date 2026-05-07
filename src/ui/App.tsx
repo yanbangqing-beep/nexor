@@ -4,7 +4,7 @@ import type { AdapterRegistry } from '../adapters/registry.js';
 import type { NotifConfig } from '../config.js';
 import { ringBell, sendDesktopNotification } from '../notify/desktop.js';
 import type { NotificationEvent, NotificationRouter } from '../notify/router.js';
-import type { Runner } from '../runner.js';
+import { type Runner, SessionBusyError } from '../runner.js';
 import type { OutputStore } from '../state/outputs.js';
 import type { PromptHistoryStore } from '../state/prompt-history.js';
 import type { SessionStore } from '../state/store.js';
@@ -152,6 +152,7 @@ export function App({ store, outputs, runner, registry, router, history, config 
       history.resetCursor(selected.id);
       setErrorBanner(null);
       runner.run(selected.id, v).catch((err: Error) => {
+        if (err instanceof SessionBusyError) return;
         setErrorBanner(err.message);
       });
     },
@@ -163,6 +164,7 @@ export function App({ store, outputs, runner, registry, router, history, config 
       const s = store.create(req);
       setSelectedId(s.id);
       setModal(null);
+      setFocus('prompt');
     },
     [store],
   );
@@ -216,7 +218,6 @@ export function App({ store, outputs, runner, registry, router, history, config 
       <Prompt
         value={input}
         onChange={setInput}
-        onSubmit={submitPrompt}
         focused={focus === 'prompt'}
         target={selected ? `${selected.agent}/${selected.label}` : '(no session)'}
       />

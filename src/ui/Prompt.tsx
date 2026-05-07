@@ -4,12 +4,11 @@ import TextInput from 'ink-text-input';
 export interface PromptProps {
   value: string;
   onChange: (v: string) => void;
-  onSubmit: (v: string) => void;
   focused: boolean;
   target: string;
 }
 
-export function Prompt({ value, onChange, onSubmit, focused, target }: PromptProps) {
+export function Prompt({ value, onChange, focused, target }: PromptProps) {
   return (
     <Box
       borderStyle={focused ? 'double' : 'single'}
@@ -17,10 +16,15 @@ export function Prompt({ value, onChange, onSubmit, focused, target }: PromptPro
       paddingX={1}
       flexDirection="column"
     >
-      <Text dimColor>→ {target}</Text>
+      <Box justifyContent="space-between">
+        <Text dimColor>→ {target}</Text>
+        <Text color={focused ? 'cyan' : 'yellow'}>
+          {focused ? 'typing — Enter to send' : 'press Tab to type'}
+        </Text>
+      </Box>
       <Box>
         <Text color="green">{'> '}</Text>
-        <TextInput value={value} onChange={onChange} onSubmit={onSubmit} focus={focused} />
+        <TextInput value={value} onChange={onChange} focus={focused} />
       </Box>
     </Box>
   );

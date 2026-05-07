@@ -9,3 +9,4 @@ coverage/
 .vscode/
 *.tsbuildinfo
 .nexor-test-data/
+scripts/
