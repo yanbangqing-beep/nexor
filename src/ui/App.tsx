@@ -1,6 +1,7 @@
 import { Box, Text, useApp, useInput } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdapterRegistry } from '../adapters/registry.js';
+import type { NotifConfig } from '../config.js';
 import { ringBell, sendDesktopNotification } from '../notify/desktop.js';
 import type { NotificationEvent, NotificationRouter } from '../notify/router.js';
 import type { Runner } from '../runner.js';
@@ -22,12 +23,13 @@ export interface AppProps {
   registry: AdapterRegistry;
   router: NotificationRouter;
   history: PromptHistoryStore;
+  config: NotifConfig;
 }
 
 type Focus = 'sidebar' | 'prompt';
 type Modal = 'new' | 'quit' | null;
 
-export function App({ store, outputs, runner, registry, router, history }: AppProps) {
+export function App({ store, outputs, runner, registry, router, history, config }: AppProps) {
   const { exit } = useApp();
   const [sessions, setSessions] = useState<Session[]>(store.list());
   const [, setOutputTick] = useState(0);
@@ -51,11 +53,11 @@ export function App({ store, outputs, runner, registry, router, history }: AppPr
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlashId(null), 2000);
       if (!muted) {
-        sendDesktopNotification(evt);
-        ringBell();
+        if (config.desktop) sendDesktopNotification(evt);
+        if (config.bell) ringBell();
       }
     });
-  }, [router, muted]);
+  }, [router, muted, config.desktop, config.bell]);
 
   const sorted = sortSessions(sessions);
   if (selectedId && !sorted.some((s) => s.id === selectedId)) {

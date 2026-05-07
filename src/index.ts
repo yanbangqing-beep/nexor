@@ -2,7 +2,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { render } from 'ink';
 import { createElement } from 'react';
-import { createDefaultRegistry } from './adapters/registry.js';
+import { createRegistry } from './adapters/registry.js';
+import { loadConfig } from './config.js';
 import { createNotificationRouter } from './notify/router.js';
 import { LockBusyError, acquireLock } from './process/lock.js';
 import { createRunner } from './runner.js';
@@ -20,6 +21,8 @@ const sessionsPath = path.join(dataDir, 'sessions.json');
 const lockPath = path.join(dataDir, 'nexor.lock');
 
 async function main() {
+  const config = await loadConfig();
+
   let lock: Awaited<ReturnType<typeof acquireLock>>;
   try {
     lock = await acquireLock(lockPath);
@@ -35,11 +38,10 @@ async function main() {
   const store = createSessionStore(initial);
   const writer = createDebouncedWriter(sessionsPath, 200);
   store.subscribe(() => writer.write(store.list()));
-  // Persist initial list (covers fresh-install state)
   writer.write(store.list());
 
   const outputs = createOutputStore();
-  const registry = createDefaultRegistry();
+  const registry = createRegistry(config);
   const runner = createRunner({ store, outputs, adapters: registry });
   const router = createNotificationRouter(store);
   const history = createPromptHistoryStore();
@@ -63,7 +65,17 @@ async function main() {
     void lock.release();
   });
 
-  render(createElement(App, { store, outputs, runner, registry, router, history }));
+  render(
+    createElement(App, {
+      store,
+      outputs,
+      runner,
+      registry,
+      router,
+      history,
+      config: config.notifications,
+    }),
+  );
 }
 
 main().catch((err) => {
