@@ -1,0 +1,45 @@
+{
+  "name": "nexor",
+  "version": "0.0.1",
+  "description": "A local-first TUI orchestrator for coding agent CLIs (Claude Code, Codex, etc.)",
+  "type": "module",
+  "bin": {
+    "nexor": "./dist/index.js"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "ink-text-input": "^6.0.0",
+    "node-notifier": "^10.0.1",
+    "react": "^18.3.1",
+    "yaml": "^2.6.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.0.0",
+    "@types/node-notifier": "^8.0.5",
+    "@types/react": "^18.3.12",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanbangqing-beep/nexor.git"
+  }
+}
