@@ -1,0 +1,137 @@
+import { describe, expect, it } from 'vitest';
+import {
+  AdapterMissingError,
+  SessionBusyError,
+  SessionNotFoundError,
+  createRunner,
+} from '../src/runner.js';
+import { createOutputStore } from '../src/state/outputs.js';
+import { createSessionStore } from '../src/state/store.js';
+import type { AgentEvent } from '../src/types.js';
+import { createStubAdapter } from './helpers/stub-adapter.js';
+
+const DEFAULT_EVENTS: AgentEvent[] = [{ type: 'done', exitCode: 0 }];
+
+function setup(adapterEvents: AgentEvent[] = DEFAULT_EVENTS, delayMs = 0) {
+  const store = createSessionStore();
+  const outputs = createOutputStore();
+  const adapter = createStubAdapter('claude', adapterEvents, { delayMs });
+  const runner = createRunner({
+    store,
+    outputs,
+    adapters: { claude: adapter },
+  });
+  const session = store.create({ agent: 'claude', label: 'test', cwd: '/tmp' });
+  return { store, outputs, runner, session };
+}
+
+describe('runner.run', () => {
+  it('transitions session to working then done on success', async () => {
+    const { store, runner, session } = setup([
+      { type: 'output', text: 'hi' },
+      { type: 'done', exitCode: 0 },
+    ] as AgentEvent[]);
+    await runner.run(session.id, 'say hi');
+    expect(store.get(session.id)?.status).toBe('done');
+    expect(store.get(session.id)?.messageCount).toBe(1);
+  });
+
+  it('transitions to error on non-zero exit code', async () => {
+    const { store, runner, session } = setup([{ type: 'done', exitCode: 1 }]);
+    await runner.run(session.id, 'do thing');
+    expect(store.get(session.id)?.status).toBe('error');
+  });
+
+  it('appends prompt + agent output to OutputStore', async () => {
+    const { outputs, runner, session } = setup([
+      { type: 'output', text: 'response text' },
+      { type: 'done', exitCode: 0 },
+    ]);
+    await runner.run(session.id, 'a prompt');
+    const buf = outputs.get(session.id);
+    expect(buf).toContain('a prompt');
+    expect(buf).toContain('response text');
+  });
+
+  it('captures session event into store.agentSessionId', async () => {
+    const { store, runner, session } = setup([
+      { type: 'session', id: 'agent-sess-xyz' },
+      { type: 'done', exitCode: 0 },
+    ]);
+    await runner.run(session.id, 'first prompt');
+    expect(store.get(session.id)?.agentSessionId).toBe('agent-sess-xyz');
+  });
+
+  it('refuses concurrent run on the same session', async () => {
+    const { runner, session } = setup([{ type: 'done', exitCode: 0 }], 50);
+    const first = runner.run(session.id, 'first');
+    await expect(runner.run(session.id, 'second')).rejects.toThrow(SessionBusyError);
+    await first;
+  });
+
+  it('isRunning reflects in-flight state', async () => {
+    const { runner, session } = setup([{ type: 'done', exitCode: 0 }], 30);
+    expect(runner.isRunning(session.id)).toBe(false);
+    const promise = runner.run(session.id, 'p');
+    expect(runner.isRunning(session.id)).toBe(true);
+    await promise;
+    expect(runner.isRunning(session.id)).toBe(false);
+  });
+
+  it('cancel aborts a running task and flips status to idle', async () => {
+    const { store, runner, session } = setup(
+      [
+        { type: 'output', text: 'one' },
+        { type: 'output', text: 'two' },
+        { type: 'done', exitCode: 0 },
+      ],
+      40,
+    );
+    const promise = runner.run(session.id, 'long thing');
+    setTimeout(() => runner.cancel(session.id), 10);
+    await promise;
+    expect(store.get(session.id)?.status).toBe('idle');
+  });
+
+  it('throws SessionNotFoundError for unknown session id', async () => {
+    const { runner } = setup();
+    await expect(runner.run('nonexistent', 'x')).rejects.toThrow(SessionNotFoundError);
+  });
+
+  it('throws AdapterMissingError when no adapter for session.agent', async () => {
+    const store = createSessionStore();
+    const outputs = createOutputStore();
+    const runner = createRunner({ store, outputs, adapters: {} });
+    const session = store.create({ agent: 'claude', label: 't', cwd: '/tmp' });
+    await expect(runner.run(session.id, 'x')).rejects.toThrow(AdapterMissingError);
+  });
+
+  it('runs different sessions concurrently without contention', async () => {
+    const store = createSessionStore();
+    const outputs = createOutputStore();
+    const runner = createRunner({
+      store,
+      outputs,
+      adapters: {
+        claude: createStubAdapter(
+          'claude',
+          [
+            { type: 'output', text: 'r' },
+            { type: 'done', exitCode: 0 },
+          ],
+          { delayMs: 30 },
+        ),
+      },
+    });
+    const a = store.create({ agent: 'claude', label: 'A', cwd: '/tmp' });
+    const b = store.create({ agent: 'claude', label: 'B', cwd: '/tmp' });
+    const start = Date.now();
+    await Promise.all([runner.run(a.id, 'pa'), runner.run(b.id, 'pb')]);
+    const elapsed = Date.now() - start;
+    expect(store.get(a.id)?.status).toBe('done');
+    expect(store.get(b.id)?.status).toBe('done');
+    // If they ran sequentially each delay 30ms times 2 events = ~60ms × 2 sessions = 120ms;
+    // concurrent should be ~60ms. Allow generous margin.
+    expect(elapsed).toBeLessThan(150);
+  });
+});

@@ -1,105 +1,128 @@
-import { Box, Text, useApp, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, useApp, useInput } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
-import { createClaudeAdapter } from '../adapters/claude.js';
+import type { AdapterRegistry } from '../adapters/registry.js';
+import type { Runner } from '../runner.js';
+import type { OutputStore } from '../state/outputs.js';
 import type { SessionStore } from '../state/store.js';
-import type { AgentEvent, Session } from '../types.js';
+import type { Session } from '../types.js';
+import { Detail } from './Detail.js';
+import { type NewSessionInput, NewSessionModal } from './NewSessionModal.js';
+import { Prompt } from './Prompt.js';
+import { Sidebar } from './Sidebar.js';
+import { StatusBar } from './StatusBar.js';
+import { sortSessions } from './sort.js';
 
 export interface AppProps {
   store: SessionStore;
+  outputs: OutputStore;
+  runner: Runner;
+  registry: AdapterRegistry;
 }
 
-const adapter = createClaudeAdapter();
+type Focus = 'sidebar' | 'prompt';
 
-export function App({ store }: AppProps) {
+export function App({ store, outputs, runner, registry }: AppProps) {
   const { exit } = useApp();
   const [sessions, setSessions] = useState<Session[]>(store.list());
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [, setOutputTick] = useState(0);
+  const [focus, setFocus] = useState<Focus>('sidebar');
+  const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
+  const [showModal, setShowModal] = useState(false);
   const [input, setInput] = useState('');
-  const [output, setOutput] = useState<string>('');
-  const [running, setRunning] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   useEffect(() => store.subscribe(() => setSessions(store.list())), [store]);
+  useEffect(() => outputs.subscribe(() => setOutputTick((n) => n + 1)), [outputs]);
 
-  const active = sessions[activeIdx];
+  const sorted = sortSessions(sessions);
+  if (selectedId && !sorted.some((s) => s.id === selectedId)) {
+    // selected was deleted; pick first
+    setTimeout(() => setSelectedId(sorted[0]?.id ?? null), 0);
+  }
+  const selectedIdx = sorted.findIndex((s) => s.id === selectedId);
+  const selected = selectedIdx >= 0 ? sorted[selectedIdx] : sorted[0];
 
   useInput((char, key) => {
-    if (key.ctrl && char === 'c') exit();
-    if (char === '[') setActiveIdx((i) => Math.max(0, i - 1));
-    if (char === ']') setActiveIdx((i) => Math.min(sessions.length - 1, i + 1));
+    if (showModal) return;
+    if (key.ctrl && char === 'c') {
+      runner.cancelAll();
+      exit();
+      return;
+    }
+    if (key.tab) {
+      setFocus((f) => (f === 'sidebar' ? 'prompt' : 'sidebar'));
+      return;
+    }
+    if (focus === 'sidebar') {
+      if (char === 'n') {
+        setShowModal(true);
+      } else if (char === 'j' || key.downArrow) {
+        const next = Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1);
+        setSelectedId(sorted[next]?.id ?? null);
+      } else if (char === 'k' || key.upArrow) {
+        const next = Math.max(0, selectedIdx - 1);
+        setSelectedId(sorted[next]?.id ?? null);
+      }
+    }
   });
 
-  const onSubmit = useCallback(
-    async (value: string) => {
-      if (!value.trim() || !active || running) return;
+  const onSubmitPrompt = useCallback(
+    (value: string) => {
+      const v = value.trim();
+      if (!v || !selected) return;
       setInput('');
-      setOutput((o) => `${o}\n> ${value}\n`);
-      setRunning(true);
-      store.update(active.id, { status: 'working' });
-
-      const ac = new AbortController();
-      try {
-        for await (const evt of adapter.exec({
-          prompt: value,
-          agentSessionId: active.agentSessionId,
-          cwd: active.cwd,
-          signal: ac.signal,
-        })) {
-          handleEvent(evt, active.id, store, setOutput);
-        }
-      } catch (err) {
-        store.update(active.id, { status: 'error' });
-        setOutput((o) => `${o}\n[error] ${(err as Error).message}\n`);
-      } finally {
-        setRunning(false);
-      }
+      setErrorBanner(null);
+      runner.run(selected.id, v).catch((err: Error) => {
+        setErrorBanner(err.message);
+      });
     },
-    [active, running, store],
+    [selected, runner],
   );
+
+  const onModalSubmit = useCallback(
+    (req: NewSessionInput) => {
+      const s = store.create(req);
+      setSelectedId(s.id);
+      setShowModal(false);
+    },
+    [store],
+  );
+
+  if (showModal) {
+    return (
+      <Box padding={1}>
+        <NewSessionModal
+          defaultCwd={process.cwd()}
+          registry={registry}
+          onSubmit={onModalSubmit}
+          onCancel={() => setShowModal(false)}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" height="100%">
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
-        <Text bold>nexor</Text>
-        <Text dimColor>{sessions.length} session(s) · use [ ] to switch · ctrl+c quit</Text>
-        {sessions.map((s, i) => (
-          <Text key={s.id} color={i === activeIdx ? 'green' : 'gray'}>
-            {i === activeIdx ? '▸ ' : '  '}[{s.agent}] {s.label} ({s.status})
-            {s.agentSessionId ? ` · sess ${s.agentSessionId.slice(0, 8)}` : ''}
-          </Text>
-        ))}
+      <Box flexGrow={1}>
+        <Sidebar
+          sessions={sorted}
+          selectedId={selected?.id ?? null}
+          focused={focus === 'sidebar'}
+        />
+        <Detail session={selected} output={selected ? outputs.get(selected.id) : ''} />
       </Box>
-      <Box flexGrow={1} flexDirection="column" paddingX={1}>
-        {active ? (
-          <Text>{output || '(no output yet — type a prompt and press Enter)'}</Text>
-        ) : (
-          <Text dimColor>(no sessions)</Text>
-        )}
-      </Box>
-      <Box borderStyle="single" borderColor="gray" paddingX={1}>
-        <Text color="green">{'> '}</Text>
-        <TextInput value={input} onChange={setInput} onSubmit={onSubmit} />
-      </Box>
+      <StatusBar
+        sessions={sessions}
+        muted={false}
+        hint={errorBanner ? `! ${errorBanner}` : undefined}
+      />
+      <Prompt
+        value={input}
+        onChange={setInput}
+        onSubmit={onSubmitPrompt}
+        focused={focus === 'prompt'}
+        target={selected ? `${selected.agent}/${selected.label}` : '(no session)'}
+      />
     </Box>
   );
-}
-
-function handleEvent(
-  evt: AgentEvent,
-  sessionId: string,
-  store: SessionStore,
-  setOutput: (fn: (o: string) => string) => void,
-) {
-  if (evt.type === 'output') {
-    setOutput((o) => `${o}${evt.text}\n`);
-  } else if (evt.type === 'session') {
-    store.update(sessionId, { agentSessionId: evt.id });
-  } else if (evt.type === 'done') {
-    const existing = store.get(sessionId);
-    store.update(sessionId, {
-      status: evt.exitCode === 0 ? 'done' : 'error',
-      messageCount: (existing?.messageCount ?? 0) + 1,
-    });
-    setOutput((o) => `${o}\n[exit ${evt.exitCode}]\n`);
-  }
 }

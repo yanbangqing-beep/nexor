@@ -1,12 +1,13 @@
-import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { render } from 'ink';
 import { createElement } from 'react';
+import { createDefaultRegistry } from './adapters/registry.js';
 import { LockBusyError, acquireLock } from './process/lock.js';
+import { createRunner } from './runner.js';
+import { createOutputStore } from './state/outputs.js';
 import { createDebouncedWriter, loadSessions } from './state/persistence.js';
 import { createSessionStore } from './state/store.js';
-import type { Session } from './types.js';
 import { App } from './ui/App.js';
 
 const dataDir = path.join(
@@ -28,49 +29,37 @@ async function main() {
     throw err;
   }
 
+  const initial = await loadSessions(sessionsPath);
+  const store = createSessionStore(initial);
+  const writer = createDebouncedWriter(sessionsPath, 200);
+  store.subscribe(() => writer.write(store.list()));
+  // Persist initial list (covers fresh-install state)
+  writer.write(store.list());
+
+  const outputs = createOutputStore();
+  const registry = createDefaultRegistry();
+  const runner = createRunner({ store, outputs, adapters: registry });
+
   let cleaned = false;
-  const cleanup = async () => {
+  const cleanup = async (code = 0) => {
     if (cleaned) return;
     cleaned = true;
+    runner.cancelAll();
     try {
       await writer.flush();
     } catch {
       /* best effort */
     }
     await lock.release();
+    process.exit(code);
   };
-  process.on('SIGINT', () => void cleanup().then(() => process.exit(130)));
-  process.on('SIGTERM', () => void cleanup().then(() => process.exit(143)));
+  process.on('SIGINT', () => void cleanup(130));
+  process.on('SIGTERM', () => void cleanup(143));
   process.on('exit', () => {
-    // sync best-effort
     void lock.release();
   });
 
-  let initial = await loadSessions(sessionsPath);
-  if (initial.length === 0) {
-    initial = [bootstrapSession()];
-  }
-
-  const store = createSessionStore(initial);
-  const writer = createDebouncedWriter(sessionsPath, 200);
-  store.subscribe(() => writer.write(store.list()));
-  writer.write(store.list());
-
-  render(createElement(App, { store }));
-}
-
-function bootstrapSession(): Session {
-  const now = Date.now();
-  return {
-    id: randomUUID(),
-    agent: 'claude',
-    label: 'default',
-    cwd: process.cwd(),
-    status: 'idle',
-    createdAt: now,
-    lastActivity: now,
-    messageCount: 0,
-  };
+  render(createElement(App, { store, outputs, runner, registry }));
 }
 
 main().catch((err) => {
