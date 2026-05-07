@@ -6,9 +6,10 @@ export interface SidebarProps {
   sessions: Session[]; // already sorted
   selectedId: string | null;
   focused: boolean;
+  flashId?: string | null;
 }
 
-export function Sidebar({ sessions, selectedId, focused }: SidebarProps) {
+export function Sidebar({ sessions, selectedId, focused, flashId }: SidebarProps) {
   const groups = groupByAgent(sessions);
 
   return (
@@ -26,13 +27,23 @@ export function Sidebar({ sessions, selectedId, focused }: SidebarProps) {
           <Text color="cyan">
             ▼ {agent} ({list.length})
           </Text>
-          {list.map((s) => (
-            <Text key={s.id} color={s.id === selectedId ? 'green' : undefined}>
-              {s.id === selectedId ? '▸ ' : '  '}
-              <Text color={statusColor(s.status)}>{statusIcon(s.status)}</Text> {s.label}{' '}
-              <Text dimColor>{timeAgo(s.lastActivity)}</Text>
-            </Text>
-          ))}
+          {list.map((s) => {
+            const isFlash = s.id === flashId;
+            const color = isFlash
+              ? s.status === 'error'
+                ? 'red'
+                : 'green'
+              : s.id === selectedId
+                ? 'green'
+                : undefined;
+            return (
+              <Text key={s.id} color={color}>
+                {s.id === selectedId ? '▸ ' : '  '}
+                <Text color={statusColor(s.status)}>{statusIcon(s.status)}</Text> {s.label}{' '}
+                <Text dimColor>{timeAgo(s.lastActivity)}</Text>
+              </Text>
+            );
+          })}
         </Box>
       ))}
     </Box>

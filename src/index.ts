@@ -3,10 +3,12 @@ import * as path from 'node:path';
 import { render } from 'ink';
 import { createElement } from 'react';
 import { createDefaultRegistry } from './adapters/registry.js';
+import { createNotificationRouter } from './notify/router.js';
 import { LockBusyError, acquireLock } from './process/lock.js';
 import { createRunner } from './runner.js';
 import { createOutputStore } from './state/outputs.js';
 import { createDebouncedWriter, loadSessions } from './state/persistence.js';
+import { createPromptHistoryStore } from './state/prompt-history.js';
 import { createSessionStore } from './state/store.js';
 import { App } from './ui/App.js';
 
@@ -39,6 +41,8 @@ async function main() {
   const outputs = createOutputStore();
   const registry = createDefaultRegistry();
   const runner = createRunner({ store, outputs, adapters: registry });
+  const router = createNotificationRouter(store);
+  const history = createPromptHistoryStore();
 
   let cleaned = false;
   const cleanup = async (code = 0) => {
@@ -59,7 +63,7 @@ async function main() {
     void lock.release();
   });
 
-  render(createElement(App, { store, outputs, runner, registry }));
+  render(createElement(App, { store, outputs, runner, registry, router, history }));
 }
 
 main().catch((err) => {
