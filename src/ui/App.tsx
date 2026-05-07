@@ -1,4 +1,4 @@
-import { Box, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { Runner } from '../runner.js';
@@ -20,6 +20,7 @@ export interface AppProps {
 }
 
 type Focus = 'sidebar' | 'prompt';
+type Modal = 'new' | 'quit' | null;
 
 export function App({ store, outputs, runner, registry }: AppProps) {
   const { exit } = useApp();
@@ -27,7 +28,7 @@ export function App({ store, outputs, runner, registry }: AppProps) {
   const [, setOutputTick] = useState(0);
   const [focus, setFocus] = useState<Focus>('sidebar');
   const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
-  const [showModal, setShowModal] = useState(false);
+  const [modal, setModal] = useState<Modal>(null);
   const [input, setInput] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -36,17 +37,37 @@ export function App({ store, outputs, runner, registry }: AppProps) {
 
   const sorted = sortSessions(sessions);
   if (selectedId && !sorted.some((s) => s.id === selectedId)) {
-    // selected was deleted; pick first
     setTimeout(() => setSelectedId(sorted[0]?.id ?? null), 0);
   }
   const selectedIdx = sorted.findIndex((s) => s.id === selectedId);
   const selected = selectedIdx >= 0 ? sorted[selectedIdx] : sorted[0];
 
+  const anyRunning = sessions.some((s) => s.status === 'working');
+
   useInput((char, key) => {
-    if (showModal) return;
+    if (modal === 'quit') {
+      if (char === 'y') {
+        runner.cancelAll();
+        exit();
+      } else if (char === 'n' || key.escape) {
+        setModal(null);
+      }
+      return;
+    }
+    if (modal === 'new') return;
+
     if (key.ctrl && char === 'c') {
       runner.cancelAll();
       exit();
+      return;
+    }
+    if (char === 'q') {
+      if (anyRunning) {
+        setModal('quit');
+      } else {
+        runner.cancelAll();
+        exit();
+      }
       return;
     }
     if (key.tab) {
@@ -55,7 +76,13 @@ export function App({ store, outputs, runner, registry }: AppProps) {
     }
     if (focus === 'sidebar') {
       if (char === 'n') {
-        setShowModal(true);
+        setModal('new');
+      } else if (char === 'c') {
+        if (selected) runner.cancel(selected.id);
+      } else if (char === 'r') {
+        if (selected) runner.reset(selected.id);
+      } else if (char === 'd') {
+        if (selected) runner.delete(selected.id);
       } else if (char === 'j' || key.downArrow) {
         const next = Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1);
         setSelectedId(sorted[next]?.id ?? null);
@@ -83,19 +110,31 @@ export function App({ store, outputs, runner, registry }: AppProps) {
     (req: NewSessionInput) => {
       const s = store.create(req);
       setSelectedId(s.id);
-      setShowModal(false);
+      setModal(null);
     },
     [store],
   );
 
-  if (showModal) {
+  if (modal === 'quit') {
+    return (
+      <Box padding={2} borderStyle="double" borderColor="red" flexDirection="column">
+        <Text bold color="red">
+          quit?
+        </Text>
+        <Text>There {anyRunning ? 'is' : 'are'} running session(s). Quit anyway?</Text>
+        <Text dimColor>y = yes · n = no</Text>
+      </Box>
+    );
+  }
+
+  if (modal === 'new') {
     return (
       <Box padding={1}>
         <NewSessionModal
           defaultCwd={process.cwd()}
           registry={registry}
           onSubmit={onModalSubmit}
-          onCancel={() => setShowModal(false)}
+          onCancel={() => setModal(null)}
         />
       </Box>
     );
@@ -114,7 +153,11 @@ export function App({ store, outputs, runner, registry }: AppProps) {
       <StatusBar
         sessions={sessions}
         muted={false}
-        hint={errorBanner ? `! ${errorBanner}` : undefined}
+        hint={
+          errorBanner
+            ? `! ${errorBanner}`
+            : 'n new · c cancel · r reset · d delete · q quit · j/k nav · Tab focus'
+        }
       />
       <Prompt
         value={input}

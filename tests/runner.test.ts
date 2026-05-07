@@ -135,3 +135,92 @@ describe('runner.run', () => {
     expect(elapsed).toBeLessThan(150);
   });
 });
+
+describe('runner.cancelAll', () => {
+  it('aborts all in-flight sessions', async () => {
+    const store = createSessionStore();
+    const outputs = createOutputStore();
+    const runner = createRunner({
+      store,
+      outputs,
+      adapters: {
+        claude: createStubAdapter(
+          'claude',
+          [
+            { type: 'output', text: 'one' },
+            { type: 'done', exitCode: 0 },
+          ],
+          { delayMs: 100 },
+        ),
+      },
+    });
+    const a = store.create({ agent: 'claude', label: 'A', cwd: '/tmp' });
+    const b = store.create({ agent: 'claude', label: 'B', cwd: '/tmp' });
+    const pa = runner.run(a.id, 'pa');
+    const pb = runner.run(b.id, 'pb');
+    expect(runner.isRunning(a.id)).toBe(true);
+    expect(runner.isRunning(b.id)).toBe(true);
+    runner.cancelAll();
+    await Promise.all([pa, pb]);
+    expect(store.get(a.id)?.status).toBe('idle');
+    expect(store.get(b.id)?.status).toBe('idle');
+  });
+});
+
+describe('runner.reset', () => {
+  it('cancels running task and clears agentSessionId', async () => {
+    const { store, runner, session } = setup(
+      [
+        { type: 'output', text: 'x' },
+        { type: 'done', exitCode: 0 },
+      ],
+      50,
+    );
+    // Simulate having a previous session id
+    store.update(session.id, { agentSessionId: 'prev-id' });
+    const promise = runner.run(session.id, 'long');
+    runner.reset(session.id);
+    await promise;
+    expect(store.get(session.id)?.agentSessionId).toBeUndefined();
+    expect(store.get(session.id)?.status).toBe('idle');
+  });
+
+  it('clears output buffer', async () => {
+    const { store, outputs, runner, session } = setup();
+    outputs.append(session.id, 'previous output');
+    runner.reset(session.id);
+    expect(outputs.get(session.id)).toBe('');
+    expect(store.get(session.id)?.status).toBe('idle');
+  });
+});
+
+describe('runner.delete', () => {
+  it('removes session from store and output buffer', () => {
+    const { store, outputs, runner, session } = setup();
+    outputs.append(session.id, 'some text');
+    expect(runner.delete(session.id)).toBe(true);
+    expect(store.get(session.id)).toBeUndefined();
+    expect(outputs.get(session.id)).toBe('');
+  });
+
+  it('cancels running task before deleting', async () => {
+    const { store, runner, session } = setup(
+      [
+        { type: 'output', text: 'x' },
+        { type: 'done', exitCode: 0 },
+      ],
+      50,
+    );
+    const promise = runner.run(session.id, 'long');
+    expect(runner.isRunning(session.id)).toBe(true);
+    expect(runner.delete(session.id)).toBe(true);
+    await promise;
+    expect(store.get(session.id)).toBeUndefined();
+    expect(runner.isRunning(session.id)).toBe(false);
+  });
+
+  it('returns false for nonexistent session', () => {
+    const { runner } = setup();
+    expect(runner.delete('nonexistent')).toBe(false);
+  });
+});

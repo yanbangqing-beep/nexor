@@ -13,6 +13,8 @@ export interface Runner {
   isRunning(sessionId: string): boolean;
   cancel(sessionId: string): void;
   cancelAll(): void;
+  reset(sessionId: string): void;
+  delete(sessionId: string): boolean;
 }
 
 export class SessionBusyError extends Error {
@@ -48,6 +50,17 @@ export function createRunner(deps: RunnerDeps): Runner {
     },
     cancelAll() {
       for (const ac of inflight.values()) ac.abort();
+    },
+    reset(sessionId) {
+      this.cancel(sessionId);
+      deps.store.update(sessionId, { agentSessionId: undefined });
+      deps.outputs.clear(sessionId);
+    },
+    delete(sessionId) {
+      this.cancel(sessionId);
+      const removed = deps.store.delete(sessionId);
+      if (removed) deps.outputs.delete(sessionId);
+      return removed;
     },
     async run(sessionId, prompt) {
       if (inflight.has(sessionId)) throw new SessionBusyError();
