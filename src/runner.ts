@@ -90,6 +90,7 @@ export function createRunner(deps: RunnerDeps): Runner {
             deps.outputs.append(sessionId, `${evt.text}\n`);
           } else if (evt.type === 'stderr') {
             stderrTail = evt.text;
+            deps.outputs.append(sessionId, `[stderr] ${evt.text}\n`);
           } else if (evt.type === 'session') {
             deps.store.update(sessionId, { agentSessionId: evt.id });
           } else if (evt.type === 'done') {
@@ -102,9 +103,6 @@ export function createRunner(deps: RunnerDeps): Runner {
                 ? stderrTail || `agent exited with code ${evt.exitCode}`
                 : undefined,
             });
-            if (failed && stderrTail) {
-              deps.outputs.append(sessionId, `\n[stderr]\n${stderrTail}\n`);
-            }
           }
         }
       } catch (err) {

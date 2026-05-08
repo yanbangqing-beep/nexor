@@ -1,6 +1,14 @@
 import { defaultSpawn } from '../process/spawn.js';
 import type { Adapter, AgentEvent, ExecOpts } from '../types.js';
-import { type SpawnFn, awaitExit, drainStderr, parseJsonl } from './base.js';
+import {
+  type SpawnFn,
+  awaitExit,
+  emptyAsync,
+  isAbortError,
+  mergeTagged,
+  parseJsonl,
+  streamStderrLines,
+} from './base.js';
 
 export interface CodexAdapterOpts {
   binary?: string;
@@ -16,24 +24,27 @@ export function createCodexAdapter(opts: CodexAdapterOpts = {}): Adapter {
     async *exec(execOpts: ExecOpts): AsyncIterable<AgentEvent> {
       const args = buildCodexArgs(execOpts);
       const child = spawn(binary, args, { cwd: execOpts.cwd, signal: execOpts.signal });
-      const stderrPromise = drainStderr(child.stderr);
+      const stdoutLines = child.stdout
+        ? parseJsonl(child.stdout)
+        : emptyAsync<Record<string, unknown>>();
+      const stderrLines = streamStderrLines(child.stderr);
       let sessionEmitted = false;
 
       try {
-        if (child.stdout) {
-          for await (const evt of parseJsonl(child.stdout)) {
-            for (const out of normalizeCodexEvent(evt, sessionEmitted)) {
+        for await (const item of mergeTagged(stdoutLines, stderrLines)) {
+          if (item.src === 'stdout') {
+            for (const out of normalizeCodexEvent(item.value, sessionEmitted)) {
               if (out.type === 'session') sessionEmitted = true;
               yield out;
             }
+          } else {
+            yield { type: 'stderr', text: item.value };
           }
         }
       } catch (err) {
         if (!isAbortError(err)) throw err;
       }
 
-      const stderrText = await stderrPromise;
-      if (stderrText) yield { type: 'stderr', text: stderrText };
       const exitCode = await awaitExit(child);
       yield { type: 'done', exitCode };
     },
@@ -85,10 +96,4 @@ function extractText(evt: Record<string, unknown>): string | null {
     return evt.output;
   }
   return null;
-}
-
-function isAbortError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { name?: string; code?: string };
-  return e.name === 'AbortError' || e.code === 'ABORT_ERR';
 }

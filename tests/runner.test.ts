@@ -54,6 +54,18 @@ describe('runner.run', () => {
     expect(outputs.get(session.id)).toContain('[stderr]');
   });
 
+  it('appends each stderr event to outputs in real time with [stderr] prefix', async () => {
+    const { outputs, runner, session } = setup([
+      { type: 'stderr', text: 'first warning' },
+      { type: 'stderr', text: 'second warning' },
+      { type: 'done', exitCode: 0 },
+    ]);
+    await runner.run(session.id, 'p');
+    const buf = outputs.get(session.id);
+    expect(buf).toContain('[stderr] first warning');
+    expect(buf).toContain('[stderr] second warning');
+  });
+
   it('ignores stderr when exit is zero', async () => {
     const { store, runner, session } = setup([
       { type: 'stderr', text: 'noisy warning' },

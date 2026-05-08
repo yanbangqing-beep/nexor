@@ -6,6 +6,7 @@ import {
 } from '../src/adapters/claude.js';
 import type { AgentEvent, ExecOpts } from '../src/types.js';
 import { createFakeChild } from './helpers/fake-child.js';
+import { createTimedFakeChild } from './helpers/timed-fake-child.js';
 
 const baseOpts: ExecOpts = {
   prompt: 'hi',
@@ -146,5 +147,46 @@ describe('claude adapter exec()', () => {
     const events: AgentEvent[] = [];
     for await (const evt of adapter.exec(baseOpts)) events.push(evt);
     expect(events.some((e) => e.type === 'stderr')).toBe(false);
+  });
+
+  it('yields one stderr event per line in real time, before stdout/done', async () => {
+    // stderr writes two lines well before any stdout activity. The adapter
+    // must surface them as separate, ordered events that arrive before the
+    // stdout-derived output and the final done.
+    const adapter = createClaudeAdapter({
+      spawn: () =>
+        createTimedFakeChild({
+          stderrSchedule: [
+            { at: 0, text: 'auth required\n' },
+            { at: 20, text: 'try claude login\n' },
+          ],
+          stdoutSchedule: [
+            {
+              at: 60,
+              text: `${JSON.stringify({
+                type: 'assistant',
+                message: { content: [{ type: 'text', text: 'hi' }] },
+              })}\n`,
+            },
+          ],
+          exitAt: 90,
+          exitCode: 0,
+        }),
+    });
+
+    const events: AgentEvent[] = [];
+    for await (const evt of adapter.exec(baseOpts)) events.push(evt);
+
+    const stderrEvents = events.filter((e) => e.type === 'stderr');
+    expect(stderrEvents).toEqual([
+      { type: 'stderr', text: 'auth required' },
+      { type: 'stderr', text: 'try claude login' },
+    ]);
+
+    const firstStderrIdx = events.findIndex((e) => e.type === 'stderr');
+    const outputIdx = events.findIndex((e) => e.type === 'output');
+    const doneIdx = events.findIndex((e) => e.type === 'done');
+    expect(firstStderrIdx).toBeLessThan(outputIdx);
+    expect(outputIdx).toBeLessThan(doneIdx);
   });
 });
