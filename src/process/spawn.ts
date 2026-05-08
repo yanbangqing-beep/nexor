@@ -17,9 +17,15 @@ export function spawnWithGrace(
 ): ChildProcess {
   const { signal, ...rest } = opts;
   const child = nodeSpawn(command, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     ...rest,
   });
+
+  // Some agents (e.g. claude -p) keep reading stdin until EOF even when the
+  // prompt is given as an argument. /dev/null via 'ignore' isn't always
+  // enough — explicitly close the writable side so the child sees end-of-input
+  // immediately and proceeds.
+  child.stdin?.end();
 
   if (signal) {
     const onAbort = () => escalateKill(child, graceMs);
