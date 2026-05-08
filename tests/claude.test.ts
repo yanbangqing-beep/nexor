@@ -66,9 +66,9 @@ describe('normalizeClaudeEvent', () => {
     expect(evts).toContainEqual({ type: 'output', text: '[tool: read_file]' });
   });
 
-  it('extracts result event text', () => {
+  it('does not emit result-event text (assistant already streamed it)', () => {
     const evts = normalizeClaudeEvent({ type: 'result', result: 'final answer' }, true);
-    expect(evts).toContainEqual({ type: 'output', text: 'final answer' });
+    expect(evts.find((e) => e.type === 'output')).toBeUndefined();
   });
 
   it('passes raw lines through as output', () => {
@@ -101,6 +101,26 @@ describe('claude adapter exec()', () => {
     expect(events[0]).toEqual({ type: 'session', id: 'sess-xyz' });
     expect(events.some((e) => e.type === 'output' && e.text === 'hi back')).toBe(true);
     expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
+  });
+
+  it('does not duplicate the answer when result echoes the final assistant text', async () => {
+    const answer = 'Hi! What would you like to work on?';
+    const stdout = `${[
+      JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1' }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: answer }] },
+      }),
+      JSON.stringify({ type: 'result', result: answer, session_id: 's1' }),
+    ].join('\n')}\n`;
+
+    const adapter = createClaudeAdapter({ spawn: () => createFakeChild({ stdout, exitCode: 0 }) });
+    const events: AgentEvent[] = [];
+    for await (const evt of adapter.exec(baseOpts)) events.push(evt);
+
+    const outputs = events.filter((e) => e.type === 'output');
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toEqual({ type: 'output', text: answer });
   });
 
   it('emits session only once even if it appears in multiple events', async () => {

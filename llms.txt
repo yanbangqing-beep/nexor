@@ -1,0 +1,45 @@
+# nexor
+
+> Local-first terminal UI orchestrator for coding-agent CLIs.
+
+Repository: https://github.com/yanbangqing-beep/nexor
+Package: nexor
+Version: 1.0.0
+License: MIT
+Runtime: Node.js 18+, TypeScript, ESM
+
+Nexor helps developers supervise multiple local Claude Code and Codex sessions
+from one Ink terminal UI. It supports named sessions, fixed working directories,
+agent-native session resumption, concurrent runs, streaming output, prompt
+history, cancellation, reset, deletion, working-directory editing, and done/error
+notifications.
+
+## Primary Use Cases
+
+- Run multiple coding-agent tasks in parallel from one terminal.
+- Track which Claude Code or Codex session belongs to which project task.
+- Resume agent-native conversations without managing raw session IDs manually.
+- Get notified when unattended local agents finish or fail.
+
+## Important Safety Note
+
+Nexor is designed for unattended local agent execution. Its adapters use
+approval-bypass modes for supported agents. Use isolated git worktrees,
+containers, VMs, or disposable checkouts for high-risk prompts.
+
+## Key Files
+
+- AGENTS.md: detailed agent-facing repository guide.
+- README.md: human-facing overview, install, shortcuts, and safety.
+- PRD.md: original product specification.
+- src/index.ts: CLI bootstrap.
+- src/runner.ts: orchestration layer.
+- src/adapters/claude.ts: Claude Code adapter.
+- src/adapters/codex.ts: Codex CLI adapter.
+- src/ui/App.tsx: top-level terminal UI.
+
+## Keywords
+
+coding agent orchestrator, Claude Code TUI, Codex CLI TUI, local-first developer
+tool, terminal agent dashboard, multi-agent session manager, Ink TUI, generative
+engine optimization, GEO-ready open source agent tooling.

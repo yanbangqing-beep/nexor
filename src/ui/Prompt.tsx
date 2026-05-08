@@ -1,30 +1,32 @@
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import { PromptInput, type PromptInputState } from './PromptInput.js';
 
 export interface PromptProps {
-  value: string;
-  onChange: (v: string) => void;
+  state: PromptInputState;
+  onChange: (next: PromptInputState) => void;
   focused: boolean;
   target: string;
+  inputRows?: number;
 }
 
-export function Prompt({ value, onChange, focused, target }: PromptProps) {
+export function Prompt({ state, onChange, focused, target, inputRows = 1 }: PromptProps) {
   return (
     <Box
       borderStyle={focused ? 'double' : 'single'}
       borderColor={focused ? 'cyan' : 'gray'}
       paddingX={1}
       flexDirection="column"
+      flexShrink={0}
     >
       <Box justifyContent="space-between">
         <Text dimColor>→ {target}</Text>
         <Text color={focused ? 'cyan' : 'yellow'}>
-          {focused ? 'typing — Enter to send' : 'press Tab to type'}
+          {focused ? 'typing — Enter to send · Ctrl+A/E line start/end' : 'press Tab to type'}
         </Text>
       </Box>
-      <Box>
+      <Box height={inputRows} overflow="hidden">
         <Text color="green">{'> '}</Text>
-        <TextInput value={value} onChange={onChange} focus={focused} />
+        <PromptInput state={state} onChange={onChange} focus={focused} />
       </Box>
     </Box>
   );

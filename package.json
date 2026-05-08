@@ -1,6 +1,6 @@
 {
   "name": "nexor",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A local-first TUI orchestrator for coding agent CLIs (Claude Code, Codex, etc.)",
   "type": "module",
   "bin": {

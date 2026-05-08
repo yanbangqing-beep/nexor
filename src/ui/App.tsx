@@ -1,4 +1,6 @@
+import * as os from 'node:os';
 import { Box, Text, useApp, useInput } from 'ink';
+import TextInput from 'ink-text-input';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { NotifConfig } from '../config.js';
@@ -10,10 +12,13 @@ import type { PromptHistoryStore } from '../state/prompt-history.js';
 import type { SessionStore } from '../state/store.js';
 import type { Session } from '../types.js';
 import { Detail } from './Detail.js';
+import { HelpPanel } from './HelpPanel.js';
 import { type NewSessionInput, NewSessionModal } from './NewSessionModal.js';
 import { Prompt } from './Prompt.js';
 import { Sidebar } from './Sidebar.js';
 import { StatusBar } from './StatusBar.js';
+import { useTerminalSize } from './hooks.js';
+import { computePromptInputRows } from './prompt-height.js';
 import { sortSessions } from './sort.js';
 
 export interface AppProps {
@@ -27,7 +32,13 @@ export interface AppProps {
 }
 
 type Focus = 'sidebar' | 'prompt';
-type Modal = 'new' | 'quit' | null;
+type Modal = 'new' | 'quit' | 'edit-cwd' | 'help' | null;
+
+function expandHome(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return `${os.homedir()}/${p.slice(2)}`;
+  return p;
+}
 
 export function App({ store, outputs, runner, registry, router, history, config }: AppProps) {
   const { exit } = useApp();
@@ -36,7 +47,8 @@ export function App({ store, outputs, runner, registry, router, history, config 
   const [focus, setFocus] = useState<Focus>('sidebar');
   const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
   const [modal, setModal] = useState<Modal>(null);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
+  const [cwdEdit, setCwdEdit] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -59,6 +71,10 @@ export function App({ store, outputs, runner, registry, router, history, config 
     });
   }, [router, muted, config.desktop, config.bell]);
 
+  const { rows, columns } = useTerminalSize();
+  const promptCap = Math.max(1, Math.min(8, Math.floor(rows / 2)));
+  const promptInputRows = computePromptInputRows(input.value, columns, promptCap);
+
   const sorted = sortSessions(sessions);
   if (selectedId && !sorted.some((s) => s.id === selectedId)) {
     setTimeout(() => setSelectedId(sorted[0]?.id ?? null), 0);
@@ -76,6 +92,14 @@ export function App({ store, outputs, runner, registry, router, history, config 
       } else if (char === 'n' || key.escape) {
         setModal(null);
       }
+      return;
+    }
+    if (modal === 'edit-cwd') {
+      if (key.escape) setModal(null);
+      return;
+    }
+    if (modal === 'help') {
+      if (key.escape || key.return || char === 'q') setModal(null);
       return;
     }
     if (modal === 'new') return;
@@ -103,23 +127,35 @@ export function App({ store, outputs, runner, registry, router, history, config 
       return;
     }
 
+    // Plain ↑/↓ always navigate sessions, regardless of focus.
+    // Alt+↑/↓ is reserved for prompt history below.
+    if ((key.upArrow || key.downArrow) && !key.meta) {
+      if (sorted.length > 0) {
+        const next = key.downArrow
+          ? Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1)
+          : Math.max(0, selectedIdx - 1);
+        setSelectedId(sorted[next]?.id ?? null);
+      }
+      return;
+    }
+
     if (focus === 'prompt') {
       if (key.shift && key.return) {
-        setInput((v) => `${v}\n`);
+        setInput((s) => ({ value: `${s.value}\n`, cursor: s.value.length + 1 }));
         return;
       }
       if (key.return) {
-        submitPrompt(input);
+        submitPrompt(input.value);
         return;
       }
-      if (key.upArrow) {
+      if (key.meta && key.upArrow) {
         const h = history.up(selected?.id ?? '');
-        if (h !== null) setInput(h);
+        if (h !== null) setInput({ value: h, cursor: h.length });
         return;
       }
-      if (key.downArrow) {
+      if (key.meta && key.downArrow) {
         const h = history.down(selected?.id ?? '');
-        if (h !== null) setInput(h);
+        if (h !== null) setInput({ value: h, cursor: h.length });
         return;
       }
     }
@@ -133,10 +169,15 @@ export function App({ store, outputs, runner, registry, router, history, config 
         if (selected) runner.reset(selected.id);
       } else if (char === 'd') {
         if (selected) runner.delete(selected.id);
-      } else if (char === 'j' || key.downArrow) {
+      } else if (char === 'e') {
+        if (selected) {
+          setCwdEdit(selected.cwd);
+          setModal('edit-cwd');
+        }
+      } else if (char === 'j') {
         const next = Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1);
         setSelectedId(sorted[next]?.id ?? null);
-      } else if (char === 'k' || key.upArrow) {
+      } else if (char === 'k') {
         const next = Math.max(0, selectedIdx - 1);
         setSelectedId(sorted[next]?.id ?? null);
       }
@@ -147,16 +188,29 @@ export function App({ store, outputs, runner, registry, router, history, config 
     (value: string) => {
       const v = value.trim();
       if (!v || !selected) return;
-      setInput('');
+      setInput({ value: '', cursor: 0 });
+      setErrorBanner(null);
+
+      if (v === '/h' || v === '/help') {
+        setModal('help');
+        return;
+      }
+
+      if (v === '/clear') {
+        runner.reset(selected.id);
+        outputs.append(selected.id, '[context cleared]\n');
+        history.resetCursor(selected.id);
+        return;
+      }
+
       history.push(selected.id, v);
       history.resetCursor(selected.id);
-      setErrorBanner(null);
       runner.run(selected.id, v).catch((err: Error) => {
         if (err instanceof SessionBusyError) return;
         setErrorBanner(err.message);
       });
     },
-    [selected, runner, history],
+    [selected, runner, history, outputs],
   );
 
   const onModalSubmit = useCallback(
@@ -167,6 +221,21 @@ export function App({ store, outputs, runner, registry, router, history, config 
       setFocus('prompt');
     },
     [store],
+  );
+
+  const submitCwdEdit = useCallback(
+    (raw: string) => {
+      if (!selected) {
+        setModal(null);
+        return;
+      }
+      const next = expandHome(raw.trim());
+      if (next.length > 0 && next !== selected.cwd) {
+        store.update(selected.id, { cwd: next });
+      }
+      setModal(null);
+    },
+    [selected, store],
   );
 
   if (modal === 'quit') {
@@ -194,6 +263,38 @@ export function App({ store, outputs, runner, registry, router, history, config 
     );
   }
 
+  if (modal === 'edit-cwd' && selected) {
+    return (
+      <Box padding={1}>
+        <Box
+          borderStyle="double"
+          borderColor="yellow"
+          flexDirection="column"
+          paddingX={2}
+          paddingY={1}
+          width={70}
+        >
+          <Text bold>edit cwd · {selected.label}</Text>
+          <Box marginTop={1}>
+            <Text color="green">cwd: </Text>
+            <TextInput value={cwdEdit} onChange={setCwdEdit} onSubmit={submitCwdEdit} />
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>Enter to save · esc to cancel · ~ expands to home</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (modal === 'help') {
+    return (
+      <Box padding={1}>
+        <HelpPanel />
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" height="100%">
       <Box flexGrow={1}>
@@ -203,23 +304,24 @@ export function App({ store, outputs, runner, registry, router, history, config 
           focused={focus === 'sidebar'}
           flashId={flashId}
         />
-        <Detail session={selected} output={selected ? outputs.get(selected.id) : ''} />
+        <Detail
+          session={selected}
+          output={selected ? outputs.get(selected.id) : ''}
+          promptInputRows={promptInputRows}
+        />
       </Box>
       <StatusBar
         sessions={sessions}
         muted={muted}
         lastNotif={lastNotif}
-        hint={
-          errorBanner
-            ? `! ${errorBanner}`
-            : 'n new · c cancel · r reset · d delete · q quit · m mute · j/k nav · Tab focus · Shift+Enter newline'
-        }
+        hint={errorBanner ? `! ${errorBanner}` : '/h help · n new · Tab focus · q quit'}
       />
       <Prompt
-        value={input}
+        state={input}
         onChange={setInput}
         focused={focus === 'prompt'}
         target={selected ? `${selected.agent}/${selected.label}` : '(no session)'}
+        inputRows={promptInputRows}
       />
     </Box>
   );

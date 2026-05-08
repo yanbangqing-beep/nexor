@@ -102,10 +102,8 @@ function extractText(evt: Record<string, unknown>): string | null {
     }
   }
 
-  if (evt.type === 'result' && typeof evt.result === 'string') {
-    return evt.result;
-  }
-
+  // `result` events recap the final assistant text — emitting them would
+  // duplicate the answer the user already saw streamed via `assistant`.
   return null;
 }
 
