@@ -8,7 +8,7 @@ Version: 1.0.0
 License: MIT
 Runtime: Node.js 18+, TypeScript, ESM
 
-Nexor helps developers supervise multiple local Claude Code and Codex sessions
+Nexor helps developers supervise multiple local Claude Code, Codex, and Alice sessions
 from one Ink terminal UI. It supports named sessions, fixed working directories,
 agent-native session resumption, concurrent runs, streaming output, prompt
 history, cancellation, reset, deletion, working-directory editing, and done/error
@@ -36,6 +36,7 @@ containers, VMs, or disposable checkouts for high-risk prompts.
 - src/runner.ts: orchestration layer.
 - src/adapters/claude.ts: Claude Code adapter.
 - src/adapters/codex.ts: Codex CLI adapter.
+- src/adapters/alice.ts: Alice JSONL exec adapter.
 - src/ui/App.tsx: top-level terminal UI.
 
 ## Keywords

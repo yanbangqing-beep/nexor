@@ -10,19 +10,19 @@ import {
   streamStderrLines,
 } from './base.js';
 
-export interface ClaudeAdapterOpts {
+export interface AliceAdapterOpts {
   binary?: string;
   spawn?: SpawnFn;
 }
 
-export function createClaudeAdapter(opts: ClaudeAdapterOpts = {}): Adapter {
-  const binary = opts.binary ?? 'claude';
+export function createAliceAdapter(opts: AliceAdapterOpts = {}): Adapter {
+  const binary = opts.binary ?? 'alice';
   const spawn = opts.spawn ?? defaultSpawn;
 
   return {
-    name: 'claude',
+    name: 'alice',
     async *exec(execOpts: ExecOpts): AsyncIterable<AgentEvent> {
-      const args = buildClaudeArgs(execOpts);
+      const args = buildAliceArgs(execOpts);
       const child = spawn(binary, args, { cwd: execOpts.cwd, signal: execOpts.signal });
       const exitPromise = awaitExit(child);
       const stdoutLines = child.stdout
@@ -34,7 +34,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOpts = {}): Adapter {
       try {
         for await (const item of mergeTagged(stdoutLines, stderrLines)) {
           if (item.src === 'stdout') {
-            for (const out of normalizeClaudeEvent(item.value, sessionEmitted)) {
+            for (const out of normalizeAliceEvent(item.value, sessionEmitted)) {
               if (out.type === 'session') sessionEmitted = true;
               yield out;
             }
@@ -52,20 +52,16 @@ export function createClaudeAdapter(opts: ClaudeAdapterOpts = {}): Adapter {
   };
 }
 
-export function buildClaudeArgs(opts: ExecOpts): string[] {
-  const args = [
-    '-p',
-    opts.prompt,
-    '--output-format',
-    'stream-json',
-    '--verbose',
-    '--dangerously-skip-permissions',
-  ];
-  if (opts.agentSessionId) args.push('--resume', opts.agentSessionId);
+export function buildAliceArgs(opts: ExecOpts): string[] {
+  const args = ['exec', '--json', '--cwd', opts.cwd];
+  if (opts.agentSessionId) {
+    args.push('--session', opts.agentSessionId);
+  }
+  args.push(opts.prompt);
   return args;
 }
 
-export function normalizeClaudeEvent(
+export function normalizeAliceEvent(
   evt: Record<string, unknown>,
   sessionAlreadyEmitted: boolean,
 ): AgentEvent[] {
@@ -76,8 +72,14 @@ export function normalizeClaudeEvent(
     return out;
   }
 
-  if (typeof evt.session_id === 'string' && !sessionAlreadyEmitted) {
-    out.push({ type: 'session', id: evt.session_id });
+  const sessionId =
+    typeof evt.session_id === 'string'
+      ? evt.session_id
+      : typeof evt.sessionId === 'string'
+        ? evt.sessionId
+        : null;
+  if (sessionId && !sessionAlreadyEmitted) {
+    out.push({ type: 'session', id: sessionId });
   }
 
   const text = extractText(evt);
@@ -86,28 +88,20 @@ export function normalizeClaudeEvent(
 }
 
 function extractText(evt: Record<string, unknown>): string | null {
-  if (evt.type === 'assistant' && isObject(evt.message)) {
-    const content = (evt.message as Record<string, unknown>).content;
-    if (Array.isArray(content)) {
-      const parts: string[] = [];
-      for (const c of content) {
-        if (!isObject(c)) continue;
-        const co = c as Record<string, unknown>;
-        if (co.type === 'text' && typeof co.text === 'string') {
-          parts.push(co.text);
-        } else if (co.type === 'tool_use' && typeof co.name === 'string') {
-          parts.push(`[tool: ${co.name}]`);
-        }
-      }
-      if (parts.length > 0) return parts.join('\n');
-    }
+  if (evt.type === 'agent_message' && typeof evt.text === 'string') {
+    return evt.text;
   }
-
-  // `result` events recap the final assistant text — emitting them would
-  // duplicate the answer the user already saw streamed via `assistant`.
+  if (evt.type === 'thinking' && typeof evt.text === 'string') {
+    return evt.text;
+  }
+  if (evt.type === 'tool_call' && typeof evt.name === 'string') {
+    return `[tool: ${evt.name}]`;
+  }
+  if (evt.type === 'tool_result' && evt.is_error === true && typeof evt.content === 'string') {
+    return `[tool error] ${evt.content}`;
+  }
+  if (evt.type === 'error' && typeof evt.message === 'string') {
+    return `[error] ${evt.message}`;
+  }
   return null;
-}
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
 }

@@ -18,8 +18,12 @@ import { Prompt } from './Prompt.js';
 import { Sidebar } from './Sidebar.js';
 import { StatusBar } from './StatusBar.js';
 import { useTerminalSize } from './hooks.js';
-import { computePromptInputRows } from './prompt-height.js';
-import { sortSessions } from './sort.js';
+import {
+  computePromptInputColumns,
+  computePromptInputRows,
+  isPromptInputCollapsed,
+} from './prompt-height.js';
+import { flattenByGroup, sortSessions } from './sort.js';
 
 export interface AppProps {
   store: SessionStore;
@@ -32,7 +36,7 @@ export interface AppProps {
 }
 
 type Focus = 'sidebar' | 'prompt';
-type Modal = 'new' | 'quit' | 'edit-cwd' | 'help' | null;
+type Modal = 'new' | 'quit' | 'edit-cwd' | null;
 
 function expandHome(p: string): string {
   if (p === '~') return os.homedir();
@@ -40,13 +44,35 @@ function expandHome(p: string): string {
   return p;
 }
 
+function isPrintableInput(
+  char: string | undefined,
+  key: { ctrl?: boolean; meta?: boolean },
+): char is string {
+  // NOTE: do NOT filter on key.meta. CJK IMEs (Squirrel, macOS Pinyin) send
+  // composed chars with key.meta=true because their UTF-8 bytes are misparsed
+  // as ESC-prefixed sequences by ink's keypress parser. Same reasoning as
+  // PromptInput.tsx — drop only pure control chars.
+  if (!char || key.ctrl) return false;
+  if (char.length !== 1) return true;
+  const code = char.charCodeAt(0);
+  return code > 31 && code !== 127;
+}
+
+function hasPrintableChar(char: string | undefined): boolean {
+  if (!char) return false;
+  if (char.length > 1) return true;
+  const code = char.charCodeAt(0);
+  return code > 31 && code !== 127;
+}
+
 export function App({ store, outputs, runner, registry, router, history, config }: AppProps) {
   const { exit } = useApp();
   const [sessions, setSessions] = useState<Session[]>(store.list());
   const [, setOutputTick] = useState(0);
-  const [focus, setFocus] = useState<Focus>('sidebar');
+  const [focus, setFocus] = useState<Focus>('prompt');
   const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
   const [modal, setModal] = useState<Modal>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
   const [cwdEdit, setCwdEdit] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -74,15 +100,28 @@ export function App({ store, outputs, runner, registry, router, history, config 
   const { rows, columns } = useTerminalSize();
   const promptCap = Math.max(1, Math.min(8, Math.floor(rows / 2)));
   const promptInputRows = computePromptInputRows(input.value, columns, promptCap);
+  const promptInputColumns = computePromptInputColumns(columns);
+  const promptInputCollapsed = isPromptInputCollapsed(input.value, columns, promptCap);
 
+  // `sorted` drives sort priority (running first, then by activity), and is
+  // then re-arranged into agent-grouped order for both rendering and j/k
+  // navigation so the cursor walks the same order the user sees.
   const sorted = sortSessions(sessions);
-  if (selectedId && !sorted.some((s) => s.id === selectedId)) {
-    setTimeout(() => setSelectedId(sorted[0]?.id ?? null), 0);
+  const visualOrder = flattenByGroup(sorted);
+  if (selectedId && !visualOrder.some((s) => s.id === selectedId)) {
+    setTimeout(() => setSelectedId(visualOrder[0]?.id ?? null), 0);
   }
-  const selectedIdx = sorted.findIndex((s) => s.id === selectedId);
-  const selected = selectedIdx >= 0 ? sorted[selectedIdx] : sorted[0];
+  const selectedIdx = visualOrder.findIndex((s) => s.id === selectedId);
+  const selected = selectedIdx >= 0 ? visualOrder[selectedIdx] : visualOrder[0];
 
   const anyRunning = sessions.some((s) => s.status === 'working');
+  const cycleSession = (delta: number) => {
+    if (visualOrder.length === 0) return;
+    const cur = Math.max(0, selectedIdx);
+    const n = visualOrder.length;
+    const next = (cur + delta + n) % n;
+    setSelectedId(visualOrder[next]?.id ?? null);
+  };
 
   useInput((char, key) => {
     if (modal === 'quit') {
@@ -98,17 +137,74 @@ export function App({ store, outputs, runner, registry, router, history, config 
       if (key.escape) setModal(null);
       return;
     }
-    if (modal === 'help') {
-      if (key.escape || key.return || char === 'q') setModal(null);
-      return;
-    }
     if (modal === 'new') return;
 
+    if (showHelp && (key.escape || key.return || char === 'q')) {
+      setShowHelp(false);
+      return;
+    }
+
+    if (focus === 'prompt' && key.ctrl && char === 'c') {
+      setInput({ value: '', cursor: 0 });
+      return;
+    }
+
+    // Ctrl+C exits from command mode.
     if (key.ctrl && char === 'c') {
       runner.cancelAll();
       exit();
       return;
     }
+
+    if (key.meta && (key.upArrow || key.downArrow)) {
+      cycleSession(key.upArrow ? -1 : 1);
+      return;
+    }
+
+    // Tab / Shift+Tab cycle through sessions in any mode.
+    // Some terminals report Tab via `key.tab`, others via `char === '\t'`.
+    if (key.tab || char === '\t') {
+      cycleSession(key.shift ? -1 : 1);
+      return;
+    }
+
+    // ESC enters command mode (vim-style). Already handled by modals above.
+    // CJK IME confirmation may set key.escape alongside a composed character
+    // (ink's keypress parser misreads the leading UTF-8 byte as ESC). Only
+    // switch to command mode when ESC arrives without a printable char.
+    if (key.escape && !hasPrintableChar(char)) {
+      setFocus('sidebar');
+      return;
+    }
+
+    if (focus === 'prompt') {
+      // INSERT mode — typing flows into PromptInput; only intercept history,
+      // submit, and newline. All other keys fall through.
+      if (key.shift && key.return) {
+        setInput((s) => ({ value: `${s.value}\n`, cursor: s.value.length + 1 }));
+        return;
+      }
+      // CJK IME confirmation may send key.return alongside the composed
+      // character. Only submit when Enter is pressed without a printable char.
+      if (key.return && !hasPrintableChar(char)) {
+        submitPrompt(input.value);
+        return;
+      }
+      if (key.upArrow) {
+        const h = history.up(selected?.id ?? '');
+        if (h !== null) setInput({ value: h, cursor: h.length });
+        return;
+      }
+      if (key.downArrow) {
+        const h = history.down(selected?.id ?? '');
+        if (h !== null) setInput({ value: h, cursor: h.length });
+        return;
+      }
+      return;
+    }
+
+    // COMMAND mode (focus === 'sidebar') — hotkeys first; any other printable
+    // character starts prompt input and keeps that first character.
     if (char === 'q') {
       if (anyRunning) {
         setModal('quit');
@@ -122,65 +218,39 @@ export function App({ store, outputs, runner, registry, router, history, config 
       setMuted((m) => !m);
       return;
     }
-    if (key.tab) {
-      setFocus((f) => (f === 'sidebar' ? 'prompt' : 'sidebar'));
-      return;
-    }
-
-    // Plain ↑/↓ always navigate sessions, regardless of focus.
-    // Alt+↑/↓ is reserved for prompt history below.
-    if ((key.upArrow || key.downArrow) && !key.meta) {
-      if (sorted.length > 0) {
-        const next = key.downArrow
-          ? Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1)
-          : Math.max(0, selectedIdx - 1);
-        setSelectedId(sorted[next]?.id ?? null);
-      }
-      return;
-    }
-
-    if (focus === 'prompt') {
-      if (key.shift && key.return) {
-        setInput((s) => ({ value: `${s.value}\n`, cursor: s.value.length + 1 }));
-        return;
-      }
-      if (key.return) {
-        submitPrompt(input.value);
-        return;
-      }
-      if (key.meta && key.upArrow) {
-        const h = history.up(selected?.id ?? '');
-        if (h !== null) setInput({ value: h, cursor: h.length });
-        return;
-      }
-      if (key.meta && key.downArrow) {
-        const h = history.down(selected?.id ?? '');
-        if (h !== null) setInput({ value: h, cursor: h.length });
-        return;
-      }
-    }
-
-    if (focus === 'sidebar') {
-      if (char === 'n') {
-        setModal('new');
-      } else if (char === 'c') {
-        if (selected) runner.cancel(selected.id);
-      } else if (char === 'r') {
-        if (selected) runner.reset(selected.id);
-      } else if (char === 'd') {
-        if (selected) runner.delete(selected.id);
-      } else if (char === 'e') {
-        if (selected) {
-          setCwdEdit(selected.cwd);
-          setModal('edit-cwd');
-        }
-      } else if (char === 'j') {
-        const next = Math.min(sorted.length - 1, Math.max(0, selectedIdx) + 1);
-        setSelectedId(sorted[next]?.id ?? null);
-      } else if (char === 'k') {
+    if (key.upArrow || char === 'k') {
+      if (visualOrder.length > 0) {
         const next = Math.max(0, selectedIdx - 1);
-        setSelectedId(sorted[next]?.id ?? null);
+        setSelectedId(visualOrder[next]?.id ?? null);
       }
+      return;
+    }
+    if (key.downArrow || char === 'j') {
+      if (visualOrder.length > 0) {
+        const next = Math.min(visualOrder.length - 1, Math.max(0, selectedIdx) + 1);
+        setSelectedId(visualOrder[next]?.id ?? null);
+      }
+      return;
+    }
+    if (char === 'n') {
+      setModal('new');
+    } else if (char === 'c') {
+      if (selected) runner.cancel(selected.id);
+    } else if (char === 'r') {
+      if (selected) runner.reset(selected.id);
+    } else if (char === 'd') {
+      if (selected) runner.delete(selected.id);
+    } else if (char === 'e') {
+      if (selected) {
+        setCwdEdit(selected.cwd);
+        setModal('edit-cwd');
+      }
+    } else if (isPrintableInput(char, key)) {
+      setFocus('prompt');
+      setInput((s) => ({
+        value: s.value.slice(0, s.cursor) + char + s.value.slice(s.cursor),
+        cursor: s.cursor + char.length,
+      }));
     }
   });
 
@@ -192,7 +262,7 @@ export function App({ store, outputs, runner, registry, router, history, config 
       setErrorBanner(null);
 
       if (v === '/h' || v === '/help') {
-        setModal('help');
+        setShowHelp(true);
         return;
       }
 
@@ -287,34 +357,38 @@ export function App({ store, outputs, runner, registry, router, history, config 
     );
   }
 
-  if (modal === 'help') {
-    return (
-      <Box padding={1}>
-        <HelpPanel />
-      </Box>
-    );
-  }
-
   return (
     <Box flexDirection="column" height="100%">
       <Box flexGrow={1}>
         <Sidebar
-          sessions={sorted}
+          sessions={visualOrder}
           selectedId={selected?.id ?? null}
           focused={focus === 'sidebar'}
           flashId={flashId}
         />
-        <Detail
-          session={selected}
-          output={selected ? outputs.get(selected.id) : ''}
-          promptInputRows={promptInputRows}
-        />
+        {showHelp ? (
+          <HelpPanel />
+        ) : (
+          <Detail
+            session={selected}
+            output={selected ? outputs.get(selected.id) : ''}
+            promptInputRows={promptInputRows}
+          />
+        )}
       </Box>
       <StatusBar
         sessions={sessions}
         muted={muted}
         lastNotif={lastNotif}
-        hint={errorBanner ? `! ${errorBanner}` : '/h help · n new · Tab focus · q quit'}
+        hint={
+          errorBanner
+            ? `! ${errorBanner}`
+            : showHelp
+              ? 'HELP · esc/q/Enter close · /clear reset context'
+              : focus === 'prompt'
+                ? 'INSERT · ↑↓ history · Alt+↑↓ sessions · Tab next · ESC commands'
+                : 'COMMAND · ↑↓/j/k sessions · Alt+↑↓ sessions · Tab next · q quit'
+        }
       />
       <Prompt
         state={input}
@@ -322,6 +396,8 @@ export function App({ store, outputs, runner, registry, router, history, config 
         focused={focus === 'prompt'}
         target={selected ? `${selected.agent}/${selected.label}` : '(no session)'}
         inputRows={promptInputRows}
+        inputColumns={promptInputColumns}
+        inputCollapsed={promptInputCollapsed}
       />
     </Box>
   );

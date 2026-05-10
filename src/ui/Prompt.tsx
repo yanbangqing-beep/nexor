@@ -7,9 +7,19 @@ export interface PromptProps {
   focused: boolean;
   target: string;
   inputRows?: number;
+  inputColumns?: number;
+  inputCollapsed?: boolean;
 }
 
-export function Prompt({ state, onChange, focused, target, inputRows = 1 }: PromptProps) {
+export function Prompt({
+  state,
+  onChange,
+  focused,
+  target,
+  inputRows = 1,
+  inputColumns = 80,
+  inputCollapsed = false,
+}: PromptProps) {
   return (
     <Box
       borderStyle={focused ? 'double' : 'single'}
@@ -21,12 +31,20 @@ export function Prompt({ state, onChange, focused, target, inputRows = 1 }: Prom
       <Box justifyContent="space-between">
         <Text dimColor>→ {target}</Text>
         <Text color={focused ? 'cyan' : 'yellow'}>
-          {focused ? 'typing — Enter to send · Ctrl+A/E line start/end' : 'press Tab to type'}
+          {focused
+            ? '-- INSERT --  ↑↓ history · Alt+↑↓ sessions · Ctrl+C clear'
+            : '-- COMMAND --  ↑↓/j/k sessions · type to insert'}
         </Text>
       </Box>
       <Box height={inputRows} overflow="hidden">
         <Text color="green">{'> '}</Text>
-        <PromptInput state={state} onChange={onChange} focus={focused} />
+        <PromptInput
+          state={state}
+          onChange={onChange}
+          focus={focused}
+          collapsed={inputCollapsed}
+          maxColumns={inputColumns}
+        />
       </Box>
     </Box>
   );

@@ -23,6 +23,7 @@ const DEFAULT_CONFIG: NexorConfig = {
   agents: {
     claude: { enabled: true, binary: 'claude' },
     codex: { enabled: true, binary: 'codex' },
+    alice: { enabled: true, binary: 'alice' },
   },
   notifications: {
     desktop: true,
@@ -58,7 +59,7 @@ function mergeWithDefaults(parsed: unknown): NexorConfig {
   const agents = { ...DEFAULT_CONFIG.agents };
   if (p.agents && typeof p.agents === 'object') {
     for (const [key, val] of Object.entries(p.agents)) {
-      if (key !== 'claude' && key !== 'codex') continue;
+      if (key !== 'claude' && key !== 'codex' && key !== 'alice') continue;
       if (!val || typeof val !== 'object') continue;
       const v = val as Record<string, unknown>;
       agents[key as AgentName] = {

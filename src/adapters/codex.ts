@@ -24,6 +24,7 @@ export function createCodexAdapter(opts: CodexAdapterOpts = {}): Adapter {
     async *exec(execOpts: ExecOpts): AsyncIterable<AgentEvent> {
       const args = buildCodexArgs(execOpts);
       const child = spawn(binary, args, { cwd: execOpts.cwd, signal: execOpts.signal });
+      const exitPromise = awaitExit(child);
       const stdoutLines = child.stdout
         ? parseJsonl(child.stdout)
         : emptyAsync<Record<string, unknown>>();
@@ -46,7 +47,7 @@ export function createCodexAdapter(opts: CodexAdapterOpts = {}): Adapter {
         if (!isAbortError(err)) throw err;
       }
 
-      const exitCode = await awaitExit(child);
+      const exitCode = await exitPromise;
       yield { type: 'done', exitCode };
     },
   };

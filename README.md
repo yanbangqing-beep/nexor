@@ -26,7 +26,7 @@ npm run dev
 
 ## Core Features
 
-- Claude Code and Codex adapters behind one normalized event interface.
+- Claude Code, Codex, and Alice adapters behind one normalized event interface.
 - Multiple concurrent sessions, including multiple sessions for the same agent.
 - Per-session label, working directory, agent session ID, status, and output.
 - Keyboard-first Ink TUI with sidebar, detail pane, status bar, and prompt input.
@@ -76,6 +76,20 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Alice Adapter
+
+`nexor` can launch Alice through its headless JSONL command:
+
+```yaml
+agents:
+  alice:
+    enabled: true
+    binary: /path/to/alice
+```
+
+The adapter runs `alice exec --json --cwd <session-cwd> [--session <id>] <prompt>`
+and stores Alice's returned session id for future prompts.
 
 ## License
 

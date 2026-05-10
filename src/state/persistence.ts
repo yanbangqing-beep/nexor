@@ -19,7 +19,7 @@ export async function loadSessions(filePath: string): Promise<Session[]> {
   }
 
   if (!Array.isArray(parsed)) return [];
-  return parsed.filter(isSession);
+  return parsed.filter(isSession).map(recoverPersistedSession);
 }
 
 export interface DebouncedWriter {
@@ -65,7 +65,7 @@ export function createDebouncedWriter(filePath: string, delayMs: number): Deboun
   };
 }
 
-const VALID_AGENTS: AgentName[] = ['claude', 'codex'];
+const VALID_AGENTS: AgentName[] = ['claude', 'codex', 'alice'];
 const VALID_STATUSES: SessionStatus[] = ['idle', 'working', 'done', 'error'];
 
 function isSession(o: unknown): o is Session {
@@ -81,4 +81,13 @@ function isSession(o: unknown): o is Session {
     VALID_AGENTS.includes(s.agent as AgentName) &&
     VALID_STATUSES.includes(s.status as SessionStatus)
   );
+}
+
+function recoverPersistedSession(session: Session): Session {
+  if (session.status !== 'working') return session;
+  return {
+    ...session,
+    status: 'idle',
+    errorMessage: undefined,
+  };
 }

@@ -30,6 +30,7 @@ describe('loadConfig', () => {
     const cfg = await loadConfig();
     expect(cfg.agents.claude).toEqual({ enabled: true, binary: 'claude' });
     expect(cfg.agents.codex).toEqual({ enabled: true, binary: 'codex' });
+    expect(cfg.agents.alice).toEqual({ enabled: true, binary: 'alice' });
     expect(cfg.notifications).toEqual({ desktop: true, bell: true });
   });
 
@@ -42,6 +43,7 @@ agents:
     const cfg = await loadConfig();
     expect(cfg.agents.claude).toEqual({ enabled: true, binary: '/opt/bin/claude' });
     expect(cfg.agents.codex).toEqual({ enabled: true, binary: 'codex' });
+    expect(cfg.agents.alice).toEqual({ enabled: true, binary: 'alice' });
   });
 
   it('disables an agent when enabled: false', async () => {
@@ -65,17 +67,26 @@ notifications:
     expect(cfg.notifications).toEqual({ desktop: false, bell: true });
   });
 
-  it('ignores unknown agent keys without throwing', async () => {
+  it('overrides alice config', async () => {
     await writeConfig(`
 agents:
   alice:
-    enabled: true
-    binary: alice
+    enabled: false
+    binary: /opt/bin/alice
 `);
     const cfg = await loadConfig();
-    expect(cfg.agents.claude).toEqual({ enabled: true, binary: 'claude' });
-    expect(cfg.agents.codex).toEqual({ enabled: true, binary: 'codex' });
-    expect((cfg.agents as Record<string, unknown>).alice).toBeUndefined();
+    expect(cfg.agents.alice).toEqual({ enabled: false, binary: '/opt/bin/alice' });
+  });
+
+  it('ignores unknown agent keys without throwing', async () => {
+    await writeConfig(`
+agents:
+  bob:
+    enabled: true
+    binary: bob
+`);
+    const cfg = await loadConfig();
+    expect((cfg.agents as Record<string, unknown>).bob).toBeUndefined();
   });
 
   it('ignores non-object agent values and keeps defaults', async () => {

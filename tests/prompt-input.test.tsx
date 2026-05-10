@@ -1,6 +1,6 @@
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
-import { PromptInput } from '../src/ui/PromptInput.js';
+import { PromptInput, formatCollapsedPromptInput } from '../src/ui/PromptInput.js';
 import { KEY, pressKey } from './helpers/ink-input.js';
 
 describe('PromptInput', () => {
@@ -95,5 +95,31 @@ describe('PromptInput', () => {
     rerender(<PromptInput state={{ value: 'abc', cursor: 3 }} onChange={onChange} focus />);
     await pressKey(stdin, KEY.right);
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('formats collapsed multiline input as a bounded summary', () => {
+    const value = Array(20).fill('pasted line').join('\n');
+    const display = formatCollapsedPromptInput(value, 32);
+
+    expect(display.length).toBeLessThanOrEqual(32);
+    expect(display).toContain('20 lines');
+    expect(display).toContain(`${value.length} chars`);
+  });
+
+  it('renders collapsed input without exposing the full pasted content', () => {
+    const value = Array(20).fill('pasted line').join('\n');
+    const { lastFrame } = render(
+      <PromptInput
+        state={{ value, cursor: value.length }}
+        onChange={vi.fn()}
+        focus
+        collapsed
+        maxColumns={40}
+      />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('20 lines');
+    expect(frame.length).toBeLessThan(value.length);
   });
 });

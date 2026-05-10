@@ -49,7 +49,23 @@ export function isAbortError(err: unknown): boolean {
 export async function awaitExit(child: ChildProcess): Promise<number> {
   if (child.exitCode !== null) return child.exitCode;
   return new Promise<number>((resolve) => {
-    child.once('exit', (code) => resolve(code ?? 1));
+    let settled = false;
+    const done = (code: number | null | undefined) => {
+      if (settled) return;
+      settled = true;
+      child.off('error', onError);
+      child.off('exit', onExit);
+      child.off('close', onClose);
+      resolve(code ?? child.exitCode ?? 1);
+    };
+    const onError = (err: NodeJS.ErrnoException) =>
+      done(typeof err.errno === 'number' ? err.errno : 1);
+    const onExit = (code: number | null) => done(code);
+    const onClose = (code: number | null) => done(code);
+
+    child.once('error', onError);
+    child.once('exit', onExit);
+    child.once('close', onClose);
   });
 }
 

@@ -1,4 +1,4 @@
-export type AgentName = 'claude' | 'codex';
+export type AgentName = 'claude' | 'codex' | 'alice';
 
 export type SessionStatus = 'idle' | 'working' | 'done' | 'error';
 

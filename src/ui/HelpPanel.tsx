@@ -1,40 +1,54 @@
 import { Box, Text } from 'ink';
+import { useTerminalSize } from './hooks.js';
 
 interface Row {
   keys: string;
   desc: string;
 }
 
-const GLOBAL_KEYS: Row[] = [
-  { keys: '↑  ↓', desc: 'navigate sessions (any focus)' },
-  { keys: 'Tab', desc: 'switch focus' },
-  { keys: 'm', desc: 'toggle desktop / bell mute' },
-  { keys: 'q', desc: 'quit' },
+const SLASH_COMMANDS: Row[] = [
+  { keys: '/h  /help', desc: 'show all commands' },
+  { keys: '/clear', desc: "clear current session's conversation context" },
 ];
 
-const SIDEBAR_KEYS: Row[] = [
+const GLOBAL_KEYS: Row[] = [
+  { keys: 'ESC', desc: 'enter COMMAND mode' },
+  { keys: 'Alt+↑ / ↓', desc: 'previous / next session' },
+  { keys: 'Tab', desc: 'next session (cycles)' },
+  { keys: 'Shift+Tab', desc: 'previous session (cycles)' },
+];
+
+const INSERT_KEYS: Row[] = [
+  { keys: 'Enter', desc: 'send prompt' },
+  { keys: 'Shift+Enter', desc: 'insert newline' },
+  { keys: '↑  ↓', desc: 'previous / next prompt history' },
+  { keys: 'Ctrl+A / E', desc: 'jump to line start / end' },
+  { keys: 'Ctrl+C', desc: 'clear prompt input' },
+];
+
+const COMMAND_KEYS: Row[] = [
+  { keys: 'typing', desc: 'start INSERT mode and keep first character' },
   { keys: 'n', desc: 'new session' },
   { keys: 'e', desc: 'edit cwd of selected session' },
   { keys: 'c', desc: 'cancel current run' },
   { keys: 'r', desc: 'reset (clear context + transcript)' },
   { keys: 'd', desc: 'delete session' },
-  { keys: 'j  k', desc: 'navigate sessions' },
+  { keys: 'm', desc: 'toggle desktop / bell mute' },
+  { keys: 'q', desc: 'quit' },
+  { keys: 'j  k  ↑  ↓', desc: 'navigate sessions' },
 ];
 
-const PROMPT_KEYS: Row[] = [
-  { keys: 'Enter', desc: 'send prompt' },
-  { keys: 'Shift+Enter', desc: 'insert newline' },
-  { keys: 'Alt+↑  Alt+↓', desc: 'recall previous / next prompt' },
-];
-
-const SLASH_COMMANDS: Row[] = [
-  { keys: '/clear', desc: "clear current session's conversation context" },
-  { keys: '/h  /help', desc: 'show this help' },
+const MODAL_KEYS: Row[] = [
+  { keys: 'new: Enter', desc: 'create session' },
+  { keys: 'new: Esc', desc: 'cancel new session' },
+  { keys: 'edit: Enter', desc: 'save cwd' },
+  { keys: 'edit: Esc', desc: 'cancel cwd edit' },
+  { keys: 'quit: y / n', desc: 'confirm / cancel quit' },
 ];
 
 function Section({ title, rows, keyWidth }: { title: string; rows: Row[]; keyWidth: number }) {
   return (
-    <Box marginTop={1} flexDirection="column">
+    <Box flexDirection="column" marginBottom={1}>
       <Text bold color="cyan">
         {title}
       </Text>
@@ -51,25 +65,36 @@ function Section({ title, rows, keyWidth }: { title: string; rows: Row[]; keyWid
 }
 
 export function HelpPanel() {
-  const keyWidth = 14;
+  const { columns } = useTerminalSize();
+  const compact = columns < 100;
+  const keyWidth = compact ? 15 : 16;
+  const left = (
+    <Box flexDirection="column" flexGrow={1} marginRight={compact ? 0 : 2}>
+      <Section title="slash commands" rows={SLASH_COMMANDS} keyWidth={keyWidth} />
+      <Section title="global navigation" rows={GLOBAL_KEYS} keyWidth={keyWidth} />
+      <Section title="INSERT mode" rows={INSERT_KEYS} keyWidth={keyWidth} />
+    </Box>
+  );
+  const right = (
+    <Box flexDirection="column" flexGrow={1}>
+      <Section title="COMMAND mode" rows={COMMAND_KEYS} keyWidth={keyWidth} />
+      <Section title="modal controls" rows={MODAL_KEYS} keyWidth={keyWidth} />
+    </Box>
+  );
+
   return (
-    <Box
-      borderStyle="double"
-      borderColor="cyan"
-      flexDirection="column"
-      paddingX={2}
-      paddingY={1}
-      width={70}
-    >
+    <Box borderStyle="single" borderColor="cyan" flexDirection="column" flexGrow={1} paddingX={1}>
       <Box justifyContent="space-between">
-        <Text bold>nexor · help</Text>
-        <Text dimColor>esc / Enter / q to close</Text>
+        <Text color="cyan" bold>
+          help
+        </Text>
+        <Text dimColor>all commands · esc / Enter / q close</Text>
       </Box>
 
-      <Section title="global" rows={GLOBAL_KEYS} keyWidth={keyWidth} />
-      <Section title="sidebar" rows={SIDEBAR_KEYS} keyWidth={keyWidth} />
-      <Section title="prompt" rows={PROMPT_KEYS} keyWidth={keyWidth} />
-      <Section title="slash commands" rows={SLASH_COMMANDS} keyWidth={keyWidth} />
+      <Box marginTop={1} flexDirection={compact ? 'column' : 'row'}>
+        {left}
+        {right}
+      </Box>
     </Box>
   );
 }

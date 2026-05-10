@@ -62,6 +62,28 @@ describe('loadSessions', () => {
     await fs.writeFile(filePath, JSON.stringify([bad]));
     expect(await loadSessions(filePath)).toEqual([]);
   });
+
+  it('round-trips alice sessions', async () => {
+    const aliceSession: Session = { ...sample, id: 'x', agent: 'alice' };
+    await fs.writeFile(filePath, JSON.stringify([aliceSession]));
+    const loaded = await loadSessions(filePath);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].agent).toBe('alice');
+  });
+
+  it('recovers persisted working sessions as idle after a previous crash', async () => {
+    const working: Session = {
+      ...sample,
+      status: 'working',
+      errorMessage: 'old error',
+    };
+    await fs.writeFile(filePath, JSON.stringify([working]));
+
+    const loaded = await loadSessions(filePath);
+
+    expect(loaded[0]).toMatchObject({ id: 'a', status: 'idle' });
+    expect(loaded[0].errorMessage).toBeUndefined();
+  });
 });
 
 describe('createDebouncedWriter', () => {

@@ -22,6 +22,19 @@ export function groupByAgent(sessions: Session[]): Map<string, Session[]> {
   return groups;
 }
 
+/**
+ * Returns sessions in the same order the Sidebar renders them: grouped by
+ * agent (in first-seen order), preserving the input ordering inside each
+ * group. j/k navigation MUST walk this list, not the flat `sortSessions`
+ * output, otherwise the cursor jumps across groups in the visible UI.
+ */
+export function flattenByGroup(sessions: Session[]): Session[] {
+  const groups = groupByAgent(sessions);
+  const out: Session[] = [];
+  for (const list of groups.values()) out.push(...list);
+  return out;
+}
+
 export function statusIcon(status: Session['status']): string {
   switch (status) {
     case 'working':

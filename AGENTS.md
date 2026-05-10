@@ -7,7 +7,7 @@ understanding of nexor.
 ## Project Summary
 
 `nexor` is a local-first terminal UI orchestrator for coding-agent CLIs. It lets
-a developer run and supervise multiple Claude Code and Codex sessions from one
+a developer run and supervise multiple Claude Code, Codex, and Alice sessions from one
 Ink-based interface, with labels, working directories, agent-native session IDs,
 streaming output, prompt history, lifecycle controls, and notifications.
 
@@ -66,6 +66,7 @@ disposable checkouts for risky tasks.
 - `src/adapters/base.ts`: JSONL stream parsing and adapter helpers.
 - `src/adapters/claude.ts`: Claude Code adapter.
 - `src/adapters/codex.ts`: Codex CLI adapter.
+- `src/adapters/alice.ts`: Alice JSONL exec adapter.
 - `src/adapters/registry.ts`: enabled adapter registry.
 - `src/process/spawn.ts`: child-process spawning and termination.
 - `src/process/lock.ts`: single-instance lock.
@@ -105,6 +106,6 @@ npm run build
 ## Release Notes For v1.0.0
 
 v1.0.0 establishes the first public GitHub version of nexor with the core
-multi-session TUI, Claude and Codex adapters, notification routing, session
+multi-session TUI, Claude, Codex, and Alice adapters, notification routing, session
 persistence, prompt editing, markdown output rendering, help, and test coverage
 for adapter normalization and UI input behavior.
